@@ -1,0 +1,58 @@
+name: Build Static BusyBox
+
+on:
+  workflow_dispatch: # Allows manual trigger
+  push:
+    branches:
+      - main
+    paths:
+      - 'busybuilder/**'
+      - 'busybox-config'
+
+jobs:
+  build-static-binary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build BusyBuilder Container
+        run: |
+          # Matches your command: docker build -t busybuilder -f busybuilder/Containerfile busybuilder
+          docker build -t busybuilder -f busybuilder/Containerfile busybuilder
+
+      - name: Compile BusyBox
+        run: |
+          mkdir -p output
+          # Matches your command: docker run --rm -v $PWD/output:/output -e MAKEFLAGS busybuilder
+          docker run --rm \
+            -v ${{ github.workspace }}/output:/output \
+            -e MAKEFLAGS="-j$(nproc)" \
+            busybuilder
+
+      - name: Verify Static Linking
+        run: |
+          # Security check to ensure it works on Sultan GKI without dependencies
+          FILE_INFO=$(file output/busybox)
+          echo "$FILE_INFO"
+          if [[ "$FILE_INFO" != *"statically linked"* ]]; then
+            echo "ERROR: Binary is not static!"
+            exit 1
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "Static BusyBox Build #${{ github.run_number }}"
+          files: output/busybox
+          body: |
+            Automated static build for **atp4pixel**.
+            Target: Android / Sultan GKI (aarch64)
+            Build Date: $(date +'%Y-%m-%d %H:%M')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
